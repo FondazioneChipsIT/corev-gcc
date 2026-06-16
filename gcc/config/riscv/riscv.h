@@ -1256,6 +1256,14 @@ extern void riscv_remove_unneeded_save_restore_calls (void);
 
 #define HAVE_POST_MODIFY_REG TARGET_XCVMEM
 
+#define USE_LOAD_POST_INCREMENT(MODE)  \
+  (TARGET_XCVMEM && GET_MODE_SIZE (MODE).to_constant () <= 2047 \
+   ? 1 : HAVE_POST_INCREMENT)
+
+#define USE_STORE_POST_INCREMENT(MODE) \
+  (TARGET_XCVMEM && GET_MODE_SIZE (MODE).to_constant () <= 2047 \
+   ? 1 : HAVE_POST_INCREMENT)
+
 /* Check TLS Descriptors mechanism is selected.  */
 #define TARGET_TLSDESC (riscv_tls_dialect == TLS_DESCRIPTORS)
 

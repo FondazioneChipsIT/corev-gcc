@@ -1317,7 +1317,7 @@ riscv_index_reg_class ()
 int
 riscv_regno_ok_for_index_p (int regno)
 {
-  if (TARGET_XTHEADMEMIDX || TARGET_XTHEADFMEMIDX)
+  if (TARGET_XTHEADMEMIDX || TARGET_XTHEADFMEMIDX || TARGET_XCVMEM)
     return riscv_regno_mode_ok_for_base_p (regno, VOIDmode, 1);
 
   return 0;
@@ -1615,6 +1615,12 @@ riscv_classify_address (struct riscv_address_info *info, rtx x,
       info->type = ADDRESS_REG;
       info->reg = x;
       info->offset = const0_rtx;
+      return riscv_valid_base_register_p (info->reg, mode, strict_p);
+
+    case POST_INC:
+      info->type = ADDRESS_REG_INC;
+      info->reg = XEXP (x, 0);
+      info->offset = const0_rtx; /* not used */
       return riscv_valid_base_register_p (info->reg, mode, strict_p);
 
     case POST_MODIFY:
