@@ -3326,7 +3326,8 @@
   "TARGET_XCVHWLP
    && reload_completed
    && hwloop_setupi_p (insn, operands[1], operands[3])
-   && !satisfies_constraint_xcvlb5 (operands[3])"
+   && (!satisfies_constraint_xcvlb5 (operands[3])
+      || !satisfies_constraint_CV__hwlp__u12 (operands[5]))"
   [(set (match_dup 6) (match_dup 5))
    (parallel
      [(set (match_dup 0) (match_dup 1))
