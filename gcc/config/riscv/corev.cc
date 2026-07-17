@@ -12,6 +12,7 @@
 #include "tm_p.h"
 #include "tree-pass.h"
 #include "df.h"
+#include "insn-addr.h"
 
 /* Creating doloop_begin patterns fully formed with a named pattern
    reusults in the labels they use to refer to the loop start being
@@ -139,6 +140,29 @@ riscv_invalid_within_doloop (const rtx_insn *insn)
   return NULL;
 }
 
+/* Return the number of 4-byte units we must conservatively assume
+   INSN occupies when estimating whether a PC-relative hardware loop
+   offset (uimm12 << 2, i.e. at most 4095 words forward) fits.
+   Ordinary insns are at most 4 bytes on RV32; inline asm statements
+   can expand to arbitrarily many instructions, so account for them
+   using their estimated instruction count.  */
+static unsigned
+hwloop_insn_units (rtx_insn *insn)
+{
+  rtx pat = PATTERN (insn);
+  const char *templ;
+
+  if (GET_CODE (pat) == ASM_INPUT)
+    templ = XSTR (pat, 0);
+  else if (asm_noperands (pat) >= 0)
+    templ = decode_asm_operands (pat, NULL, NULL, NULL, NULL, NULL);
+  else
+    return 1;
+
+  int n = templ ? asm_str_count (templ) : 1;
+  return n > 0 ? (unsigned) n : 1;
+}
+
 /* Starting at INSN, try to find, within the next COUNT insn,
    a doloop_end_i pattern that provides the label END .
    If found, return the remaining value of COUNT, otherwise, 0.  */
@@ -157,9 +181,46 @@ doloop_end_range_check (rtx_insn *insn, rtx_insn *end, unsigned count)
 	  if (label_ref_label (XEXP (label_use, 0)) == end)
 	    break;
 	}
-      count--;
+      unsigned units = hwloop_insn_units (insn);
+      if (units >= count)
+	return 0;
+      count -= units;
     }
   return count;
+}
+
+/* Return true if LABEL lies *ahead* of INSN and close enough that the
+   12-bit unsigned word offset of cv.starti / cv.endi
+   (lpstart/lpend = PC + (uimm12 << 2), i.e. at most 4095 words
+   forward) is guaranteed to be able to address it.  MAX_UNITS is the
+   conservative insn budget to assume (4095 after reload, fewer before
+   reload to leave headroom for spill code).
+   Walking forward also establishes the direction: the offset field is
+   unsigned, so a label behind INSN can never be addressed by the
+   immediate forms, no matter how close it is.  */
+bool
+hwloop_label_offset_in_range_p (rtx uncast_insn, rtx label_ref,
+				unsigned max_units)
+{
+  rtx_insn *insn = as_a <rtx_insn *> (uncast_insn);
+  if (GET_CODE (label_ref) == UNSPEC)
+    label_ref = XVECEXP (label_ref, 0, 0);
+  rtx_insn *label = label_ref_label (label_ref);
+
+  for (rtx_insn *scan = insn; ; scan = NEXT_INSN (scan))
+    {
+      if (scan == NULL)
+	/* Fell off the insn chain: LABEL is behind INSN.  */
+	return false;
+      if (scan == label)
+	return true;
+      if (scan == insn || !active_insn_p (scan))
+	continue;
+      unsigned units = hwloop_insn_units (scan);
+      if (units >= max_units)
+	return false;
+      max_units -= units;
+    }
 }
 
 /* Determine if we can implement the loop setup MD_INSN with cv.setupi,
@@ -186,6 +247,30 @@ hwloop_setupi_p (rtx md_insn, rtx start_ref, rtx end_ref)
     return false;
 
   return true;
+}
+
+/* Called from the output templates of the *cv_start / *cv_end
+   patterns when they are about to emit cv.starti / cv.endi.  Once
+   shorten_branches has computed instruction addresses, verify that
+   the PC-relative target OP (a LABEL_REF) lies ahead of INSN and
+   within the 12-bit unsigned word offset (uimm12 << 2).  Basic block
+   reordering runs after the doloop splits, so this is the last line
+   of defense: an unencodable offset here is a compiler bug, and a
+   clean ICE beats emitting an instruction that the assembler rejects
+   or silently truncates.  Note that the addresses computed by
+   shorten_branches over-estimate insn sizes when RVC is in use, so a
+   distance that passes here can only shrink in the final binary.  */
+void
+corev_check_hwloop_offset (rtx_insn *insn, rtx op)
+{
+  if (GET_CODE (op) != LABEL_REF || !INSN_ADDRESSES_SET_P ())
+    return;
+  HOST_WIDE_INT src = INSN_ADDRESSES (INSN_UID (insn));
+  HOST_WIDE_INT dst = INSN_ADDRESSES (INSN_UID (label_ref_label (op)));
+  HOST_WIDE_INT offset = dst - src;
+  if (offset < 0 || offset > 4095 * 4)
+    fatal_insn ("hardware loop label out of range for PC-relative "
+		"hardware loop instruction", insn);
 }
 
 void
@@ -322,7 +407,15 @@ pass_riscv_doloop_ranges::execute (function *)
       if (next_active_insn (label_ref_label (start_label_ref))
 	  != next_active_insn (insn))
 	{
-	  if (GET_CODE (*lref_s_loc) == UNSPEC)
+	  /* Only promise a 12-bit offset if the start label really is
+	     ahead of INSN and within reach of the unsigned PC-relative
+	     offset field of cv.starti; otherwise fall back to a bare
+	     LABEL_REF so that the doloop_begin_i split loads the label
+	     address into the scratch register and uses cv.start.  */
+	  if (GET_CODE (*lref_s_loc) == UNSPEC
+	      && hwloop_label_offset_in_range_p (insn, start_label_ref,
+						 reload_completed
+						 ? 4095 : 585))
 	    *lref_s_loc = gen_rtx_UNSPEC (SImode,
 					  gen_rtvec (1, start_label_ref),
 					  UNSPEC_CV_LP_START_12);

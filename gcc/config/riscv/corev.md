@@ -3286,18 +3286,32 @@
    && !hwloop_setupi_p (insn, operands[1], operands[3])"
   [(set (match_dup 4) (match_dup 5))]
 {
-  if (GET_CODE (operands[1]) == UNSPEC)
+  if (GET_CODE (operands[1]) == UNSPEC
+      && (XINT (operands[1], 1) == UNSPEC_CV_FOLLOWS
+	  || (XINT (operands[1], 1) == UNSPEC_CV_LP_START_12
+	      && hwloop_label_offset_in_range_p (curr_insn, operands[1],
+						 4095))))
     operands[1] = XVECEXP (operands[1], 0, 0);
   else
     {
+      if (GET_CODE (operands[1]) == UNSPEC)
+	operands[1] = XVECEXP (operands[1], 0, 0);
+      gcc_assert (REG_P (operands[6]));
       emit_move_insn (operands[6], operands[1]);
       operands[1] = operands[6];
     }
   emit_insn (gen_rtx_SET (operands[0], operands[1]));
-  if (GET_CODE (operands[3]) == UNSPEC)
+  /* Same reasoning for the end label and cv.endi.  */
+  if (GET_CODE (operands[3]) == UNSPEC
+      && (XINT (operands[3], 1) == UNSPEC_CV_LP_END_5
+	  || XINT (operands[3], 1) == UNSPEC_CV_LP_END_12)
+      && hwloop_label_offset_in_range_p (curr_insn, operands[3], 4095))
     operands[3] = XVECEXP (operands[3], 0, 0);
   else
     {
+      if (GET_CODE (operands[3]) == UNSPEC)
+	operands[3] = XVECEXP (operands[3], 0, 0);
+      gcc_assert (REG_P (operands[6]));
       emit_move_insn (operands[6], operands[3]);
       operands[3] = operands[6];
     }
@@ -3377,7 +3391,10 @@
   if (!REG_P (operands[1]) && TARGET_RVC)
     asm_fprintf (asm_out_file, "\t.balign\t4\n");
   operands[0] = GEN_INT (REGNO (operands[0]) == LPSTART0_REGNUM ? 0 : 1);
-  return REG_P (operands[1]) ? "cv.start %0,%1" : "cv.starti %0, %1";
+  if (REG_P (operands[1]))
+    return "cv.start %0,%1";
+  corev_check_hwloop_offset (insn, operands[1]);
+  return "cv.starti %0, %1";
 }
   [(set_attr "move_type" "move")])
 
@@ -3389,7 +3406,10 @@
   if (!REG_P (operands[1]) && TARGET_RVC)
     asm_fprintf (asm_out_file, "\t.balign\t4\n");
   operands[0] = GEN_INT (REGNO (operands[0]) == LPEND0_REGNUM ? 0 : 1);
-  return REG_P (operands[1]) ? "cv.end %0,%1" : "cv.endi %0, %1";
+  if (REG_P (operands[1]))
+    return "cv.end %0,%1";
+  corev_check_hwloop_offset (insn, operands[1]);
+  return "cv.endi %0, %1";
 }
   [(set_attr "move_type" "move")])
 
