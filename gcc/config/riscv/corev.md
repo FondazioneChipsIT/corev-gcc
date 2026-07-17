@@ -3281,6 +3281,7 @@
   ;; Even in the cases where we already can know before reload that we must
   ;; split, the test is costly, and splitting early could confuse RA.
   "&& reload_completed
+   && riscv_hwloop_splitting_p
    && (GET_CODE (operands[1]) == LABEL_REF
        || GET_CODE (operands[1]) == UNSPEC)
    && !hwloop_setupi_p (insn, operands[1], operands[3])"
@@ -3339,6 +3340,7 @@
    (clobber (match_operand:SI 6 "register_operand"))]
   "TARGET_XCVHWLP
    && reload_completed
+   && riscv_hwloop_splitting_p
    && hwloop_setupi_p (insn, operands[1], operands[3])
    && (!satisfies_constraint_xcvlb5 (operands[3])
       || !satisfies_constraint_CV__hwlp__u12 (operands[5]))"

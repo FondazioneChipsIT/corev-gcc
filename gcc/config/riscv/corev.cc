@@ -282,6 +282,49 @@ add_label_op_ref (rtx_insn *insn, rtx label)
   ++LABEL_NUSES (label);
 }
 
+/* Splitting doloop_begin_i into cv.starti / cv.endi / cv.counti (or
+   loading the operands into registers for cv.start / cv.end /
+   cv.count) gives up the single-insn cv.setupi / cv.setup forms and
+   creates PC-relative references that later code motion (bbro,
+   sched2) can invalidate.  We therefore keep doloop_begin_i intact
+   until the post-sched2 run of the riscv_doloop_ranges pass has had a
+   chance to glue it back to the loop start; only then is splitting
+   enabled, and the pass performs it itself via split_all_insns.  */
+bool riscv_hwloop_splitting_p;
+
+/* Return true if INSN (a doloop_begin_i whose loop count operand is
+   COUNT) can be moved forward so it immediately precedes LABEL, the
+   loop start.  This requires a straight-line NEXT_INSN chain from
+   INSN to LABEL: crossing a label would make the setup execute on
+   join paths that did not execute it before, and crossing a jump or
+   call would move it across control flow.  The crossed insns must
+   neither modify the register the loop count is read from (the setup
+   would then read a clobbered value) nor touch any of the hardware
+   loop registers (e.g. a nested loop's own setup).  */
+static bool
+hwloop_safe_to_move_p (rtx_insn *insn, rtx_insn *label, rtx count)
+{
+  for (rtx_insn *scan = NEXT_INSN (insn); scan != label;
+       scan = NEXT_INSN (scan))
+    {
+      if (scan == NULL)
+	/* Fell off the insn chain: LABEL is behind INSN.  */
+	return false;
+      if (LABEL_P (scan) || BARRIER_P (scan))
+	return false;
+      if (!INSN_P (scan))
+	continue;
+      if (JUMP_P (scan) || CALL_P (scan))
+	return false;
+      if (REG_P (count) && reg_set_p (count, scan))
+	return false;
+      if (refers_to_regno_p (LPSTART0_REGNUM, LPCOUNT1_REGNUM + 1,
+			     PATTERN (scan), NULL))
+	return false;
+    }
+  return true;
+}
+
 
 /* Before register allocation, we need to know if a cv.setupi instruction
    might need to replaced with instructions that use an extra scratch
@@ -354,11 +397,20 @@ public:
 unsigned int
 pass_riscv_doloop_ranges::execute (function *)
 {
+  bool saw_doloop_p = false;
+
+  /* Before register allocation, splitting must stay disabled; the
+     post-sched2 run below re-enables it once insn placement is
+     final.  */
+  if (!reload_completed)
+    riscv_hwloop_splitting_p = false;
+
   for (rtx_insn *insn = get_insns (); insn; insn = NEXT_INSN (insn))
     {
       if (!NONJUMP_INSN_P (insn)
 	  || recog_memoized (insn) != CODE_FOR_doloop_begin_i)
 	continue;
+      saw_doloop_p = true;
       rtx *lref_s_loc = &SET_SRC (XVECEXP (PATTERN (insn), 0, 0));
       rtx *lref_e_loc = &SET_SRC (XVECEXP (PATTERN (insn), 0, 1));
       rtx lp_count =        SET_SRC (XVECEXP (PATTERN (insn), 0, 2));
@@ -371,18 +423,20 @@ pass_riscv_doloop_ranges::execute (function *)
 	end_label_ref = XVECEXP (end_label_ref, 0, 0);
 
       if (reload_completed
-	  && GET_CODE (scratch) == SCRATCH
 	  && (next_active_insn (label_ref_label (start_label_ref))
 	      != next_active_insn (insn))
-	  && CONST_INT_P (lp_count))
+	  && hwloop_safe_to_move_p (insn,
+				    label_ref_label (start_label_ref),
+				    lp_count))
 	{
-	  /* This is supposed to be a cv.setupi, but register allocation
-	     put spill code in between the doloop_setup_i and the loop
-	     start.  Move the doloop_begin_i back to the start of the loop.
-	     We can't do this if the loop counter is initialized from a
-	     register, because that register might be used by the spill code;
-	     it fact, it is likely to be used by it, so there is little point
-	     to analyze if it is.
+	  /* Register allocation spill code, sched2 or block reordering
+	     put insns in between the doloop_begin_i and the loop start.
+	     Move the doloop_begin_i back to the start of the loop so
+	     that the single-insn cv.setup / cv.setupi forms remain
+	     usable; hwloop_safe_to_move_p has verified that the crossed
+	     insns neither clobber the count register nor touch the
+	     hardware loop registers, and that no control flow is
+	     crossed.
 	     ??? We could allow the doloop_begin_i pattern to read the count
 	     from memory (using clobber and splitter to fix that up) to have
 	     a better chance to get code that allows the doloop_begin_i to
@@ -454,6 +508,19 @@ pass_riscv_doloop_ranges::execute (function *)
 	}
       else
 	*lref_e_loc = end_label_ref;
+    }
+
+  /* This run happens after sched2; no pass that moves insns runs
+     later, so the setup insns that we could glue back to their loop
+     will now be emitted as cv.setup / cv.setupi.  Enable splitting
+     and split whatever could not be glued (out-of-range labels,
+     spaghetti layout) into the cv.start(i) / cv.end(i) / cv.count(i)
+     sequences.  */
+  if (reload_completed)
+    {
+      riscv_hwloop_splitting_p = true;
+      if (saw_doloop_p)
+	split_all_insns ();
     }
 
   return 0;
