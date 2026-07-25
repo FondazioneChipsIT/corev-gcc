@@ -3270,10 +3270,10 @@
    (clobber (match_scratch:SI 6))]
   "TARGET_XCVHWLP"
   {@ [cons: =0, 1, =2, 3, =4, 5, =6; attrs: length ]
-    [xcvl0s, CV_hwlp_ul0, xcvl0e, xcvlb5, xcvl0c, CV_hwlp_u12, X ; 4] cv.setupi\t0, %5, %3
-    [xcvl1s, CV_hwlp_ul0, xcvl1e, xcvlb5, xcvl1c, CV_hwlp_u12, X ; 4] cv.setupi\t1, %5, %3
-    [xcvl0s, CV_hwlp_ul0, xcvl0e, xcvlbe, xcvl0c, r,    X ; 4] cv.setup\t0, %5, %3
-    [xcvl1s, CV_hwlp_ul0, xcvl1e, xcvlbe, xcvl1c, r,    X ; 4] cv.setup\t1, %5, %3
+    [xcvl0s, CV_hwlp_ul0, xcvl0e, xcvlb5, xcvl0c, CV_hwlp_u12, &r ; 4] cv.setupi\t0, %5, %3
+    [xcvl1s, CV_hwlp_ul0, xcvl1e, xcvlb5, xcvl1c, CV_hwlp_u12, &r ; 4] cv.setupi\t1, %5, %3
+    [xcvl0s, CV_hwlp_ul0, xcvl0e, xcvlbe, xcvl0c, r,    &r ; 4] cv.setup\t0, %5, %3
+    [xcvl1s, CV_hwlp_ul0, xcvl1e, xcvlbe, xcvl1c, r,    &r ; 4] cv.setup\t1, %5, %3
     [xcvl0s,?iCV_hwlp_ul0,xcvl0e,?ixcvlbe,xcvl0c, ?ri, &r ; 12] #
     [xcvl1s,?iCV_hwlp_ul0,xcvl1e,?ixcvlbe,xcvl1c, ?ri, &r ; 12] #
   }
@@ -3327,6 +3327,24 @@
   [(set_attr "move_type" "move")]
 )
 
+;; Post-reload form of doloop_begin_i with the loop count already in a
+;; register.  Emitted by the splitter below, which runs from
+;; pass_riscv_doloop_ranges after sched2, so this pattern must not
+;; contain a match_scratch: nothing would ever allocate it.  Otherwise
+;; identical to the cv.setup alternatives of doloop_begin_i.
+(define_insn "*doloop_setup_reg"
+  [(set (match_operand:SI 0 "lpstart_reg_op" "=xcvl0s,xcvl1s")
+        (match_operand:SI 1 "" "CV_hwlp_ul0,CV_hwlp_ul0"))
+   (set (match_operand:SI 2 "lpend_reg_op" "=xcvl0e,xcvl1e")
+        (match_operand:SI 3 "" "xcvlbe,xcvlbe"))
+   (set (match_operand:SI 4 "register_operand" "=xcvl0c,xcvl1c")
+        (match_operand:SI 5 "register_operand" "r,r"))]
+  "TARGET_XCVHWLP && reload_completed"
+  "@
+   cv.setup\t0, %5, %3
+   cv.setup\t1, %5, %3"
+  [(set_attr "length" "4")])
+
 ;; If we have a doloop_begin_i instruction that has labels that
 ;; statisfy cv.setup, but not cv.setupi, yet the loop count is an
 ;; immediate, split to load the immediate into the scratch register.
@@ -3348,9 +3366,9 @@
    (parallel
      [(set (match_dup 0) (match_dup 1))
       (set (match_dup 2) (match_dup 3))
-      (set (match_dup 4) (match_dup 6))
-      (clobber (scratch:SI))])]
+      (set (match_dup 4) (match_dup 6))])]
 )
+
 
 (define_expand "doloop_begin"
   [(use (match_operand 0 "register_operand"))
