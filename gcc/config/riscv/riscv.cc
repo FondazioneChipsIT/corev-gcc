@@ -524,6 +524,22 @@ static const struct riscv_tune_param xiangshan_nanhu_tune_info = {
   NULL,						/* vector cost */
 };
 
+static const struct riscv_tune_param cv32e40p_tune_info = {
+  {COSTS_N_INSNS (3), COSTS_N_INSNS (3)},	/* fp_add */
+  {COSTS_N_INSNS (3), COSTS_N_INSNS (3)},	/* fp_mul */
+  {COSTS_N_INSNS (19), COSTS_N_INSNS (19)},	/* fp_div */
+  {COSTS_N_INSNS (1), COSTS_N_INSNS (4)},	/* int_mul */
+  {COSTS_N_INSNS (34), COSTS_N_INSNS (68)},	/* int_div */
+  1,						/* issue rate */
+  3,						/* branch_cost */
+  2,						/* memory_cost */
+  8,						/* fmv_cost */
+  true,						/* slow_unaligned_access */
+  false,					/* use_divmod_expansion */
+  RISCV_FUSE_NOTHING,				/* fusible_ops */
+  NULL,						/* vector cost */
+};
+
 /* Costs to use when optimizing for a generic ooo profile.  */
 static const struct riscv_tune_param generic_ooo_tune_info = {
   {COSTS_N_INSNS (2), COSTS_N_INSNS (2)},	/* fp_add */

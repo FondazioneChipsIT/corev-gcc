@@ -57,9 +57,25 @@
        (eq_attr "type" "sfb_alu"))
   "alu")
 
+(define_insn_reservation "generic_mulh" 5
+  (and (eq_attr "tune" "generic")
+       (match_test "recog_memoized (insn) == CODE_FOR_smulsi3_highpart
+                 || recog_memoized (insn) == CODE_FOR_umulsi3_highpart
+                 || recog_memoized (insn) == CODE_FOR_usmulsi3_highpart
+                 || recog_memoized (insn) == CODE_FOR_smuldi3_highpart
+                 || recog_memoized (insn) == CODE_FOR_umuldi3_highpart
+                 || recog_memoized (insn) == CODE_FOR_usmuldi3_highpart"))
+  "imuldiv*5")
+
 (define_insn_reservation "generic_imul" 10
   (and (eq_attr "tune" "generic")
-       (eq_attr "type" "imul,clmul,cpop"))
+       (and (eq_attr "type" "imul,clmul,cpop")
+            (match_test "recog_memoized (insn) != CODE_FOR_smulsi3_highpart
+                      && recog_memoized (insn) != CODE_FOR_umulsi3_highpart
+                      && recog_memoized (insn) != CODE_FOR_usmulsi3_highpart
+                      && recog_memoized (insn) != CODE_FOR_smuldi3_highpart
+                      && recog_memoized (insn) != CODE_FOR_umuldi3_highpart
+                      && recog_memoized (insn) != CODE_FOR_usmuldi3_highpart")))
   "imuldiv*10")
 
 (define_insn_reservation "generic_idivsi" 34
