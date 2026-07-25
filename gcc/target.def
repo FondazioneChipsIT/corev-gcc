@@ -4594,6 +4594,14 @@ original and the returned modes should be @code{MODE_INT}.",
  (machine_mode mode),
  default_preferred_doloop_mode)
 
+/* Return true to process loops from innermost to outermost.  */
+DEFHOOK
+(doloop_innermost_first,
+ "Return true if @code{doloop_optimize_loops} should process\n\
+loops from innermost to outermost.",
+ bool, (void),
+ hook_bool_void_false)
+
 /* Returns true for a legitimate combined insn.  */
 DEFHOOK
 (legitimate_combined_insn,

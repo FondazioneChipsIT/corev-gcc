@@ -11217,6 +11217,14 @@ riscv_get_raw_result_mode (int regno)
   return default_get_reg_raw_mode (regno);
 }
 
+/* Implements hook TARGET_DOLOOP_INNERMOST_FIRST.  */
+
+static bool
+riscv_doloop_innermost_first (void)
+{
+  return TARGET_XCVHWLP;
+}
+
 /* Initialize the GCC target structure.  */
 #undef TARGET_ASM_ALIGNED_HI_OP
 #define TARGET_ASM_ALIGNED_HI_OP "\t.half\t"
@@ -11574,6 +11582,9 @@ riscv_get_raw_result_mode (int regno)
 
 #undef TARGET_GET_RAW_RESULT_MODE
 #define TARGET_GET_RAW_RESULT_MODE riscv_get_raw_result_mode
+
+#undef TARGET_DOLOOP_INNERMOST_FIRST
+#define TARGET_DOLOOP_INNERMOST_FIRST riscv_doloop_innermost_first
 
 struct gcc_target targetm = TARGET_INITIALIZER;
 
