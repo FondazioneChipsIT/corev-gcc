@@ -163,11 +163,14 @@ hwloop_insn_units (rtx_insn *insn)
   return n > 0 ? (unsigned) n : 1;
 }
 
-/* Starting at INSN, try to find, within the next COUNT insn,
-   a doloop_end_i pattern that provides the label END .
-   If found, return the remaining value of COUNT, otherwise, 0.  */
+/* Starting at INSN, walk forward up to COUNT insn-units looking for the
+   doloop_end_i that closes the loop whose start label is START_LAB
+   (the branch-back target, a real shared label).  Return the remaining
+   count if found, else 0.  We match on the start label rather than the
+   loop-end operand, because the end operand is an unplaced placeholder
+   (null / uid-0) and cannot be compared by identity.  */
 static unsigned
-doloop_end_range_check (rtx_insn *insn, rtx_insn *end, unsigned count)
+doloop_end_range_check (rtx_insn *insn, rtx_insn *start_lab, unsigned count)
 {
   for (; count > 0; insn = NEXT_INSN (insn))
     {
@@ -177,10 +180,12 @@ doloop_end_range_check (rtx_insn *insn, rtx_insn *end, unsigned count)
 	continue;
       if (recog_memoized (insn) == CODE_FOR_doloop_end_i)
 	{
-	  rtx label_use = XVECEXP (PATTERN (insn), 0, 4);
-	  if (label_ref_label (XEXP (label_use, 0)) == end)
+	  rtx ite = SET_SRC (XVECEXP (PATTERN (insn), 0, 0));
+	  rtx tgt = XEXP (ite, 1);
+	  if (GET_CODE (tgt) == LABEL_REF
+	    && label_ref_label (tgt) == start_lab)
 	    break;
-	}
+        }
       unsigned units = hwloop_insn_units (insn);
       if (units >= count)
 	return 0;
@@ -223,6 +228,51 @@ hwloop_label_offset_in_range_p (rtx uncast_insn, rtx label_ref,
     }
 }
 
+/* As hwloop_label_offset_in_range_p, but for the loop *end*.  The end
+   label is an unplaced placeholder: it never appears in the insn chain
+   (doloop_end_i emits it itself via its "%4:" template), so scanning for
+   it always falls off the chain and reports "out of range", forcing the
+   address into a register.  Measure instead to the doloop_end_i that
+   closes this loop, identified by its branch-target (loop start) label
+   START_LAB -- that insn is where the end label will be emitted.  */
+bool
+hwloop_end_offset_in_range_p (rtx uncast_insn, rtx_insn *start_lab,
+			      unsigned max_units)
+{
+  rtx_insn *insn = as_a <rtx_insn *> (uncast_insn);
+  for (rtx_insn *scan = insn; ; scan = NEXT_INSN (scan))
+    {
+      if (scan == NULL)
+	return false;
+      if (scan != insn && active_insn_p (scan)
+	  && recog_memoized (scan) == CODE_FOR_doloop_end_i)
+	{
+	  rtx ite = SET_SRC (XVECEXP (PATTERN (scan), 0, 0));
+	  rtx tgt = XEXP (ite, 1);
+	  if (GET_CODE (tgt) == LABEL_REF
+	      && label_ref_label (tgt) == start_lab)
+	    return true;
+	}
+      if (scan == insn || !active_insn_p (scan))
+	continue;
+      unsigned units = hwloop_insn_units (scan);
+      if (units >= max_units)
+	return false;
+      max_units -= units;
+    }
+}
+
+static bool
+hwloop_valid_label_p (rtx ref)
+{
+  if (GET_CODE (ref) == UNSPEC)
+    ref = XVECEXP (ref, 0, 0);
+  if (GET_CODE (ref) != LABEL_REF)
+    return false;
+  rtx lab = XEXP (ref, 0);
+  return lab && LABEL_P (lab) && INSN_UID (lab) != 0;   /* uid 0 == unplaced placeholder */
+}
+
 /* Determine if we can implement the loop setup MD_INSN with cv.setupi,
    considering the hardware loop starts at the labels in the LABEL_REFs
    START_REF and END_REF.  */
@@ -230,20 +280,24 @@ hwloop_label_offset_in_range_p (rtx uncast_insn, rtx label_ref,
 bool
 hwloop_setupi_p (rtx md_insn, rtx start_ref, rtx end_ref)
 {
+  if (!hwloop_valid_label_p (start_ref))
+    return false;
   rtx_insn *insn = as_a <rtx_insn *> (md_insn);
   if (GET_CODE (start_ref) == UNSPEC)
     start_ref = XVECEXP (start_ref, 0, 0);
-  if (GET_CODE (end_ref) == UNSPEC)
-    end_ref = XVECEXP (end_ref, 0, 0);
   rtx_insn *start = label_ref_label (start_ref);
-  rtx_insn *end = label_ref_label (end_ref);
+
+  if (GET_CODE (end_ref) == UNSPEC
+      && XINT (end_ref, 1) == UNSPEC_CV_LP_END_12
+      && !REG_P (SET_SRC (XVECEXP (PATTERN (insn), 0, 2))))
+    return false;
 
   /* The the loop must directly follow the cv.setupi instruction.  */
   if (next_active_insn (insn) != next_active_insn (start))
     return false;
 
   /* Loops with >= 4K instructions can't be setup with cv.setupi .  */
-  if (doloop_end_range_check (insn, end, 4095) == 0)
+  if (doloop_end_range_check (insn, start, 4095) == 0)
     return false;
 
   return true;
@@ -265,8 +319,11 @@ corev_check_hwloop_offset (rtx_insn *insn, rtx op)
 {
   if (GET_CODE (op) != LABEL_REF || !INSN_ADDRESSES_SET_P ())
     return;
+  rtx_insn *lab = label_ref_label (op);
+  if (!lab || INSN_UID (lab) == 0)
+    return;
   HOST_WIDE_INT src = INSN_ADDRESSES (INSN_UID (insn));
-  HOST_WIDE_INT dst = INSN_ADDRESSES (INSN_UID (label_ref_label (op)));
+  HOST_WIDE_INT dst = INSN_ADDRESSES (INSN_UID (lab));
   HOST_WIDE_INT offset = dst - src;
   if (offset < 0 || offset > 4095 * 4)
     fatal_insn ("hardware loop label out of range for PC-relative "
@@ -444,15 +501,14 @@ pass_riscv_doloop_ranges::execute (function *)
 	     ??? Much better would be to have a hook or other mechanism to
 	     prevent reload / lra from inserting spill code between
 	     doloop_begin_i and the loop start.  */
-
-	  rtx_insn *prev = PREV_INSN (insn);
 	  rtx_insn *next = NEXT_INSN (insn);
-	  SET_NEXT_INSN (prev) = NEXT_INSN (insn);
-	  SET_PREV_INSN (next) = PREV_INSN (insn);
+	  rtx_insn *after = PREV_INSN (label_ref_label (start_label_ref));
+
+	  remove_insn (insn);
 	  SET_PREV_INSN (insn) = NULL_RTX;
 	  SET_NEXT_INSN (insn) = NULL_RTX;
-
-	  emit_insn_after (insn, PREV_INSN (label_ref_label (start_label_ref)));
+	  emit_insn_after (insn, after);
+	  df_insn_rescan (insn);
 
 	  insn = next;
 	  continue;
@@ -491,9 +547,10 @@ pass_riscv_doloop_ranges::execute (function *)
 	    emit_insn_before (gen_doloop_align (), insn);
 	}
 
-      rtx_insn *end_label = label_ref_label (end_label_ref);
       unsigned count = (reload_completed ? 4095 : 585);
-      unsigned rest = doloop_end_range_check (insn, end_label, count);
+      unsigned rest = doloop_end_range_check (insn, 
+		                  label_ref_label (start_label_ref),
+				  count);
 
       if (rest)
 	{

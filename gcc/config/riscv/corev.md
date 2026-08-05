@@ -3287,6 +3287,12 @@
    && !hwloop_setupi_p (insn, operands[1], operands[3])"
   [(set (match_dup 4) (match_dup 5))]
 {
+  /* Capture the loop start label before operands[1] is rewritten below
+     (it may become a bare LABEL_REF or the scratch register).  */
+  rtx start_lab_ref = (GET_CODE (operands[1]) == UNSPEC
+		       ? XVECEXP (operands[1], 0, 0) : operands[1]);
+  rtx_insn *start_lab = (GET_CODE (start_lab_ref) == LABEL_REF
+			 ? label_ref_label (start_lab_ref) : NULL);
   if (GET_CODE (operands[1]) == UNSPEC
       && (XINT (operands[1], 1) == UNSPEC_CV_FOLLOWS
 	  || (XINT (operands[1], 1) == UNSPEC_CV_LP_START_12
@@ -3306,7 +3312,8 @@
   if (GET_CODE (operands[3]) == UNSPEC
       && (XINT (operands[3], 1) == UNSPEC_CV_LP_END_5
 	  || XINT (operands[3], 1) == UNSPEC_CV_LP_END_12)
-      && hwloop_label_offset_in_range_p (curr_insn, operands[3], 4095))
+      && start_lab
+      && hwloop_end_offset_in_range_p (curr_insn, start_lab, 4095))
     operands[3] = XVECEXP (operands[3], 0, 0);
   else
     {
