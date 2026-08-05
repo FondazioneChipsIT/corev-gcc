@@ -3147,8 +3147,11 @@
   while (n_nops--)
     asm_fprintf (asm_out_file, "\tnop\n");
   output_asm_insn ("%4:", operands);
+  /* Pop rather than ".option rvc": with a nested hardware loop this end
+     label is still inside the enclosing loop body, whose own doloop_align
+     pushed norvc.  A bare ".option rvc" would re-enable RVC there.  */
   if (TARGET_RVC)
-    asm_fprintf (asm_out_file, "\t.option rvc\n");
+    asm_fprintf (asm_out_file, "\t.option pop\n");
   return "";
 }
   [(set_attr "type" "branch")
@@ -3240,7 +3243,7 @@
 (define_insn "doloop_align"
   [(unspec_volatile [(const_int 0)] UNSPECV_CV_LOOPALIGN)]
   "TARGET_XCVHWLP && TARGET_RVC"
-  ".balign\t4\;.option norvc"
+  ".balign\t4\;.option push\;.option norvc"
   [(set_attr "type" "ghost")])
 
 ; We use an actual doloop_begin pattern to make sure the loop counter
