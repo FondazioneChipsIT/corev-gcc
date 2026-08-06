@@ -12201,6 +12201,11 @@ otherwise the original @code{mode} should be returned.  For example, on a
 original and the returned modes should be @code{MODE_INT}.
 @end deftypefn
 
+@deftypefn {Target Hook} bool TARGET_DOLOOP_INNERMOST_FIRST (void)
+Return true if @code{doloop_optimize_loops} should process
+loops from innermost to outermost.
+@end deftypefn
+
 @deftypefn {Target Hook} bool TARGET_LEGITIMATE_COMBINED_INSN (rtx_insn *@var{insn})
 Take an instruction in @var{insn} and return @code{false} if the instruction
 is not appropriate as a combination of two or more instructions.  The

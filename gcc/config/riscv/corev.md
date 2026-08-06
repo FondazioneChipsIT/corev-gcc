@@ -3270,10 +3270,10 @@
    (clobber (match_scratch:SI 6))]
   "TARGET_XCVHWLP"
   {@ [cons: =0, 1, =2, 3, =4, 5, =6; attrs: length ]
-    [xcvl0s, CV_hwlp_ul0, xcvl0e, xcvlb5, xcvl0c, CV_hwlp_u12, X ; 4] cv.setupi\t0, %5, %3
-    [xcvl1s, CV_hwlp_ul0, xcvl1e, xcvlb5, xcvl1c, CV_hwlp_u12, X ; 4] cv.setupi\t1, %5, %3
-    [xcvl0s, CV_hwlp_ul0, xcvl0e, xcvlbe, xcvl0c, r,    X ; 4] cv.setup\t0, %5, %3
-    [xcvl1s, CV_hwlp_ul0, xcvl1e, xcvlbe, xcvl1c, r,    X ; 4] cv.setup\t1, %5, %3
+    [xcvl0s, CV_hwlp_ul0, xcvl0e, xcvlb5, xcvl0c, CV_hwlp_u12, &r ; 4] cv.setupi\t0, %5, %3
+    [xcvl1s, CV_hwlp_ul0, xcvl1e, xcvlb5, xcvl1c, CV_hwlp_u12, &r ; 4] cv.setupi\t1, %5, %3
+    [xcvl0s, CV_hwlp_ul0, xcvl0e, xcvlbe, xcvl0c, r,    &r ; 4] cv.setup\t0, %5, %3
+    [xcvl1s, CV_hwlp_ul0, xcvl1e, xcvlbe, xcvl1c, r,    &r ; 4] cv.setup\t1, %5, %3
     [xcvl0s,?iCV_hwlp_ul0,xcvl0e,?ixcvlbe,xcvl0c, ?ri, &r ; 12] #
     [xcvl1s,?iCV_hwlp_ul0,xcvl1e,?ixcvlbe,xcvl1c, ?ri, &r ; 12] #
   }
@@ -3281,23 +3281,45 @@
   ;; Even in the cases where we already can know before reload that we must
   ;; split, the test is costly, and splitting early could confuse RA.
   "&& reload_completed
+   && riscv_hwloop_splitting_p
    && (GET_CODE (operands[1]) == LABEL_REF
        || GET_CODE (operands[1]) == UNSPEC)
    && !hwloop_setupi_p (insn, operands[1], operands[3])"
   [(set (match_dup 4) (match_dup 5))]
 {
-  if (GET_CODE (operands[1]) == UNSPEC)
+  /* Capture the loop start label before operands[1] is rewritten below
+     (it may become a bare LABEL_REF or the scratch register).  */
+  rtx start_lab_ref = (GET_CODE (operands[1]) == UNSPEC
+		       ? XVECEXP (operands[1], 0, 0) : operands[1]);
+  rtx_insn *start_lab = (GET_CODE (start_lab_ref) == LABEL_REF
+			 ? label_ref_label (start_lab_ref) : NULL);
+  if (GET_CODE (operands[1]) == UNSPEC
+      && (XINT (operands[1], 1) == UNSPEC_CV_FOLLOWS
+	  || (XINT (operands[1], 1) == UNSPEC_CV_LP_START_12
+	      && hwloop_label_offset_in_range_p (curr_insn, operands[1],
+						 4095))))
     operands[1] = XVECEXP (operands[1], 0, 0);
   else
     {
+      if (GET_CODE (operands[1]) == UNSPEC)
+	operands[1] = XVECEXP (operands[1], 0, 0);
+      gcc_assert (REG_P (operands[6]));
       emit_move_insn (operands[6], operands[1]);
       operands[1] = operands[6];
     }
   emit_insn (gen_rtx_SET (operands[0], operands[1]));
-  if (GET_CODE (operands[3]) == UNSPEC)
+  /* Same reasoning for the end label and cv.endi.  */
+  if (GET_CODE (operands[3]) == UNSPEC
+      && (XINT (operands[3], 1) == UNSPEC_CV_LP_END_5
+	  || XINT (operands[3], 1) == UNSPEC_CV_LP_END_12)
+      && start_lab
+      && hwloop_end_offset_in_range_p (curr_insn, start_lab, 4095))
     operands[3] = XVECEXP (operands[3], 0, 0);
   else
     {
+      if (GET_CODE (operands[3]) == UNSPEC)
+	operands[3] = XVECEXP (operands[3], 0, 0);
+      gcc_assert (REG_P (operands[6]));
       emit_move_insn (operands[6], operands[3]);
       operands[3] = operands[6];
     }
@@ -3312,6 +3334,24 @@
   [(set_attr "move_type" "move")]
 )
 
+;; Post-reload form of doloop_begin_i with the loop count already in a
+;; register.  Emitted by the splitter below, which runs from
+;; pass_riscv_doloop_ranges after sched2, so this pattern must not
+;; contain a match_scratch: nothing would ever allocate it.  Otherwise
+;; identical to the cv.setup alternatives of doloop_begin_i.
+(define_insn "*doloop_setup_reg"
+  [(set (match_operand:SI 0 "lpstart_reg_op" "=xcvl0s,xcvl1s")
+        (match_operand:SI 1 "" "CV_hwlp_ul0,CV_hwlp_ul0"))
+   (set (match_operand:SI 2 "lpend_reg_op" "=xcvl0e,xcvl1e")
+        (match_operand:SI 3 "" "xcvlbe,xcvlbe"))
+   (set (match_operand:SI 4 "register_operand" "=xcvl0c,xcvl1c")
+        (match_operand:SI 5 "register_operand" "r,r"))]
+  "TARGET_XCVHWLP && reload_completed"
+  "@
+   cv.setup\t0, %5, %3
+   cv.setup\t1, %5, %3"
+  [(set_attr "length" "4")])
+
 ;; If we have a doloop_begin_i instruction that has labels that
 ;; statisfy cv.setup, but not cv.setupi, yet the loop count is an
 ;; immediate, split to load the immediate into the scratch register.
@@ -3325,15 +3365,17 @@
    (clobber (match_operand:SI 6 "register_operand"))]
   "TARGET_XCVHWLP
    && reload_completed
+   && riscv_hwloop_splitting_p
    && hwloop_setupi_p (insn, operands[1], operands[3])
-   && !satisfies_constraint_xcvlb5 (operands[3])"
+   && (!satisfies_constraint_xcvlb5 (operands[3])
+      || !satisfies_constraint_CV__hwlp__u12 (operands[5]))"
   [(set (match_dup 6) (match_dup 5))
    (parallel
      [(set (match_dup 0) (match_dup 1))
       (set (match_dup 2) (match_dup 3))
-      (set (match_dup 4) (match_dup 6))
-      (clobber (scratch:SI))])]
+      (set (match_dup 4) (match_dup 6))])]
 )
+
 
 (define_expand "doloop_begin"
   [(use (match_operand 0 "register_operand"))
@@ -3376,7 +3418,10 @@
   if (!REG_P (operands[1]) && TARGET_RVC)
     asm_fprintf (asm_out_file, "\t.balign\t4\n");
   operands[0] = GEN_INT (REGNO (operands[0]) == LPSTART0_REGNUM ? 0 : 1);
-  return REG_P (operands[1]) ? "cv.start %0,%1" : "cv.starti %0, %1";
+  if (REG_P (operands[1]))
+    return "cv.start %0,%1";
+  corev_check_hwloop_offset (insn, operands[1]);
+  return "cv.starti %0, %1";
 }
   [(set_attr "move_type" "move")])
 
@@ -3388,7 +3433,10 @@
   if (!REG_P (operands[1]) && TARGET_RVC)
     asm_fprintf (asm_out_file, "\t.balign\t4\n");
   operands[0] = GEN_INT (REGNO (operands[0]) == LPEND0_REGNUM ? 0 : 1);
-  return REG_P (operands[1]) ? "cv.end %0,%1" : "cv.endi %0, %1";
+  if (REG_P (operands[1]))
+    return "cv.end %0,%1";
+  corev_check_hwloop_offset (insn, operands[1]);
+  return "cv.endi %0, %1";
 }
   [(set_attr "move_type" "move")])
 

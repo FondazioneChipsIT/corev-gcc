@@ -797,7 +797,8 @@ doloop_optimize_loops (void)
       df_live_set_all_dirty ();
     }
 
-  for (auto loop : loops_list (cfun, 0))
+  unsigned flags = targetm.doloop_innermost_first () ? LI_FROM_INNERMOST : 0;
+  for (auto loop : loops_list (cfun, flags))
     doloop_optimize (loop);
 
   if (optimize == 1)
@@ -807,3 +808,4 @@ doloop_optimize_loops (void)
 
   checking_verify_loop_structure ();
 }
+

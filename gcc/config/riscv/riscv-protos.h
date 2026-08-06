@@ -804,8 +804,14 @@ rtl_opt_pass * make_pass_riscv_doloop_ranges (gcc::context *ctxt);
 extern bool riscv_can_use_doloop_p (const widest_int &, const widest_int &,
 				    unsigned int, bool);
 extern const char *riscv_invalid_within_doloop (const rtx_insn *insn);
+extern bool riscv_hwloop_splitting_p;
 extern bool hwloop_setupi_p (rtx insn, rtx start_ref, rtx end_ref);
+extern bool hwloop_label_offset_in_range_p (rtx insn, rtx label_ref,
+					    unsigned max_units);
+extern bool hwloop_end_offset_in_range_p (rtx insn, rtx_insn *start_lab,
+					  unsigned max_units);
 extern void add_label_op_ref (rtx_insn *insn, rtx label);
+extern void corev_check_hwloop_offset (rtx_insn *insn, rtx op);
 extern int corev_label_align (rtx_insn *);
 
 
