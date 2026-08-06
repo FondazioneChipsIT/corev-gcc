@@ -254,7 +254,9 @@
 
 (define_predicate "mem_post_inc"
   (and (match_code "mem")
-       (match_test "TARGET_XCVMEM && GET_CODE (XEXP (op, 0)) == POST_MODIFY
+       (match_test "TARGET_XCVMEM
+                    && (GET_CODE (XEXP (op, 0)) == POST_MODIFY
+			|| GET_CODE (XEXP (op, 0)) == POST_INC)
                     && GET_MODE_SIZE (GET_MODE (op)).to_constant () <= 4")))
 
 (define_predicate "mem_plus_reg"

@@ -6512,7 +6512,7 @@ riscv_print_operand_punct_valid_p (unsigned char code)
 /* Implement TARGET_PRINT_OPERAND_ADDRESS.  */
 
 static void
-riscv_print_operand_address (FILE *file, machine_mode mode ATTRIBUTE_UNUSED, rtx x)
+riscv_print_operand_address (FILE *file, machine_mode mode, rtx x)
 {
   struct riscv_address_info addr;
 
@@ -6544,8 +6544,12 @@ riscv_print_operand_address (FILE *file, machine_mode mode ATTRIBUTE_UNUSED, rtx
 
       case ADDRESS_REG_INC:
 	fprintf (file, "(%s),", reg_names[REGNO (addr.reg)]);
-	if (REG_P (addr.offset)) fprintf (file, "%s", reg_names[REGNO (addr.offset)]);
-	else output_addr_const (file, addr.offset);
+	if (GET_CODE (x) == POST_INC)
+	  fprintf (file, HOST_WIDE_INT_PRINT_DEC, GET_MODE_SIZE (mode).to_constant ());
+	else if (REG_P (addr.offset))
+	  fprintf (file, "%s", reg_names[REGNO (addr.offset)]);
+	else
+	  output_addr_const (file, addr.offset);
 	return;
 
       default:

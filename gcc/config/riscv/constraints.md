@@ -302,12 +302,13 @@
 
 (define_memory_constraint "CV_mem_post"
   "@internal
-   An address for post-modify or reg+reg stores and loads"
+   An address for post-modify, post-increment, or reg+reg stores and loads"
   (and (match_code "mem")
        (match_test "(GET_CODE (XEXP (op, 0)) == PLUS
                 && GET_CODE (XEXP (XEXP (op, 0), 0)) == REG
                 && GET_CODE (XEXP (XEXP (op, 0), 1)) == REG)
-		|| GET_CODE (XEXP (op, 0)) == POST_MODIFY")))
+		|| GET_CODE (XEXP (op, 0)) == POST_MODIFY
+		|| GET_CODE (XEXP (op, 0)) == POST_INC")))
 
 (define_memory_constraint "CV_mem_nopm"
   "@internal
