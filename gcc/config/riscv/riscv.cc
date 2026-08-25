@@ -1634,20 +1634,25 @@ riscv_classify_address (struct riscv_address_info *info, rtx x,
       return riscv_valid_base_register_p (info->reg, mode, strict_p);
 
     case POST_INC:
+    case POST_MODIFY:
+      if (!TARGET_XCVMEM || !known_le (GET_MODE_SIZE (mode), 4))
+	return false;
+
       info->type = ADDRESS_REG_INC;
       info->reg = XEXP (x, 0);
-      info->offset = const0_rtx; /* not used */
-      return riscv_valid_base_register_p (info->reg, mode, strict_p);
 
-    case POST_MODIFY:
+      if (GET_CODE (x) == POST_INC)
+	{
+	  info->offset = const0_rtx; /* not used */
+	  return riscv_valid_base_register_p (info->reg, mode, strict_p);
+	}
+
       /* For instructions using post inc, the offset can either be register
        * or 12-bit immediate. */
-       info->type = ADDRESS_REG_INC;
-       info->reg = XEXP (x, 0);
-       info->offset = XEXP ((XEXP (x, 1)), 1);
-       return (riscv_valid_base_register_p (info->reg, mode, strict_p)
-       && (riscv_valid_base_register_p (info->offset, mode, strict_p)
-	       || riscv_valid_offset_p (info->offset, mode)));
+      info->offset = XEXP ((XEXP (x, 1)), 1);
+      return (riscv_valid_base_register_p (info->reg, mode, strict_p)
+	      && (riscv_valid_base_register_p (info->offset, mode, strict_p)
+		  || riscv_valid_offset_p (info->offset, mode)));
 
     case PLUS:
       /* RVV load/store disallow any offset.  */
